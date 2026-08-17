@@ -115,30 +115,47 @@ fi
 echo "==> compilation buffer: $COMP_BUFFER" >&2
 
 # ---------------------------------------------------------------------------
-# Poll until compile.el's own finish sentinel line appears.
+# Wait for the run to finish. NOT regex-scraping the buffer for a finish
+# line -- compile.el's own exit message is prefixed with `mode-name', not a
+# hardcoded "Compilation": a COMINT buffer (what --run-test uses) says
+# "Comint exited abnormally...", not "Compilation exited abnormally...", so
+# a "^Compilation " pattern silently never matches and this would wait out
+# the full timeout on every single run regardless of how fast the test
+# actually finished (found live: a real 3m45s run that had already failed
+# and exited was still "not detected" under the old regex).
+#
+# Register a one-shot compilation-finish-functions hook instead -- fires
+# exactly once, on the real process-exit event, independent of mode-name or
+# message wording -- and have it write a sentinel file bash can just stat.
+# Guard the race where the process already finished before we got here
+# (fast/trivial runs): write the sentinel ourselves in that case since the
+# hook cannot fire retroactively for an already-dead process.
 # ---------------------------------------------------------------------------
-poll_form=$(render_form '
+SENTINEL_FILE=$(mktemp)
+rm -f "$SENTINEL_FILE"  # hook (or the race branch) creates it; absence == not done yet
+hook_form=$(render_form '
 (with-current-buffer (get-buffer "@@BUF@@")
-  (if (save-excursion
-        (goto-char (point-max))
-        (re-search-backward
-         "^Compilation \\(finished\\|exited abnormally\\|segmentation fault\\)" nil t))
-      t
-    nil))
-' '@@BUF@@' "$COMP_BUFFER")
+  (if (process-live-p (get-buffer-process (current-buffer)))
+      (add-hook (quote compilation-finish-functions)
+                (lambda (_buf _msg) (write-region "done" nil "@@SENTINEL@@" nil (quote silent)))
+                nil t)
+    (write-region "done" nil "@@SENTINEL@@" nil (quote silent)))
+  t)
+' '@@BUF@@' "$COMP_BUFFER" '@@SENTINEL@@' "$SENTINEL_FILE")
+eeval "$hook_form" >/dev/null
 
 echo "==> waiting for the run to finish (timeout ${RUN_TIMEOUT}s)..." >&2
 elapsed=0
-while :; do
-  done_p=$(eeval "$poll_form")
-  [ "$done_p" = "t" ] && break
+while [ ! -f "$SENTINEL_FILE" ]; do
   if [ "$elapsed" -ge "$RUN_TIMEOUT" ]; then
     echo "ERROR: run-timeout (${RUN_TIMEOUT}s) exceeded waiting for $COMP_BUFFER to finish" >&2
+    rm -f "$SENTINEL_FILE"
     exit 5
   fi
   sleep 1
   elapsed=$((elapsed + 1))
 done
+rm -f "$SENTINEL_FILE"
 
 # ---------------------------------------------------------------------------
 # Print the full buffer via a temp file — sidesteps any Lisp string-escaping
