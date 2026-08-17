@@ -1,6 +1,6 @@
 ---
 name: eglot-java-test
-description: Run a Java test class or method, or just check that a file compiles, in this project through JDTLS/Eglot (via emacsclient), and read the result. Use after editing a .java file to verify it compiles, when asked to run a test or a specific test method, to check if a fix passes, or to iterate on a Java test failure — as an alternative to shelling out to mvnw directly.
+description: Run a Java test class or method, check that a file compiles, or pause a test at a breakpoint to inspect live state (e.g. read a page's real HTML to derive a Selenium locator), in this project through JDTLS/Eglot/dape (via emacsclient). Use after editing a .java file to verify it compiles, when asked to run a test or a specific test method, to check if a fix passes, to iterate on a Java test failure, or when you would otherwise have to ask the user to manually navigate to a screen and report back a locator/selector — as an alternative to shelling out to mvnw directly or asking the user to drive a manual debug session.
 ---
 
 # eglot-java-test
@@ -22,12 +22,13 @@ This repo IS the skill directory. Either:
 Script paths below are relative to wherever this `SKILL.md` ends up living
 — resolve them against that directory, not the consuming project's root.
 
-Two scripts, pick based on what you actually need:
+Three scripts, pick based on what you actually need:
 
 | Script | Use when | Cost |
 |---|---|---|
 | `scripts/build-check.sh` | You just edited a `.java` file and want to know it still compiles | Cheap — incremental compile via JDTLS's own builder |
 | `scripts/run-and-read.sh` | You need to actually exercise a test class/method | Heavier — spins up a JVM (or Maven) to run it |
+| `scripts/debug-eval.sh` | You need live state at a specific point in a test — e.g. a page's real HTML to derive a locator, instead of asking the user to open devtools | Heaviest — starts a real debug session (browser included), pauses at a breakpoint, evaluates an expression, then tears down |
 
 **Default to `build-check.sh` right after editing a file.** Only reach for
 `run-and-read.sh` when you specifically need test *behavior*, not just
@@ -156,3 +157,53 @@ Non-zero exits mean something went wrong *before* you got a result:
 
 In all of these, stderr has a specific one-line reason — surface it to the
 user rather than guessing.
+
+## `debug-eval.sh` — pause at a breakpoint and inspect live state
+
+```bash
+scripts/debug-eval.sh <project-root> <test-file> <fqmn> <bp-file> <bp-line> <expression> [hit-timeout=180] [cold-start-timeout=300]
+```
+
+For when you would otherwise have to ask the user to manually navigate to a
+screen in the running app and report back an element locator. Instead:
+starts a real dape/JDTLS debug session on `fqmn`, sets a breakpoint at
+`bp-file:bp-line`, waits for it to be hit, evaluates a Java `expression` in
+that paused frame's context, then resumes and tears the whole session down.
+
+**Pick the breakpoint line yourself** by reading the test/Screen source —
+put it right after the navigation call that reaches the screen you care
+about, before any assertions. For the expression, `driver.getPageSource()`
+(or whatever the project's WebDriver field/accessor is called — read the
+test's base class to find it) gets you the actual rendered HTML, so you can
+derive a locator directly from real markup instead of asking the user to
+open devtools. `getCurrentUrl()`, or evaluating a specific `WebElement`
+variable already in scope at that line, are also fair game — it is any
+expression valid at that breakpoint, not just page source.
+
+This is the heaviest of the three scripts: a real browser launches and a
+JVM thread sits suspended until the expression resolves. **Do not fire this
+off speculatively** — only when you have a concrete need for live state
+that reading source cannot answer. After the evaluate result comes back,
+the session is resumed and immediately torn down (`dape-continue` then
+`dape-quit`) — this grabs one snapshot and cleans up eagerly, it does not
+wait for or report the test's actual outcome. Use `run-and-read.sh` if you
+need that.
+
+This script does **not** implement the interactive Maven-surefire-debug
+fallback that `eglot-helpers-java-debug-test-method` falls back to when the
+JDTLS debug/test plugin is not loaded — if starting the session fails for
+that reason, it exits cleanly with a pointer to try
+`M-x eglot-helpers-java-reload-bundles` (or
+`eglot-helpers-java-restart-server-clean`) interactively first, rather than
+attempting to replicate that fallback headlessly.
+
+Exit codes:
+
+| Exit | Meaning |
+|---|---|
+| 1 | Bad arguments |
+| 2 | `emacsclient` can't reach an Emacs server |
+| 3 | Cold start: JDTLS never attached within the timeout |
+| 4 | Starting the debug session failed (e.g. debug/test plugin not loaded) |
+| 5 | Timed out waiting for the breakpoint to be hit |
+| 6 | Timed out waiting for the evaluate result to appear |
