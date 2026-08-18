@@ -21,6 +21,10 @@
 #      this script does not attempt the interactive Maven-debug fallback)
 #   5  timed out waiting for the breakpoint to be hit
 #   6  timed out waiting for the evaluate result to appear
+#   7  the dape/JDTLS debug connection died while waiting for the
+#      breakpoint (caught via a periodic health check instead of silently
+#      waiting out the full hit-timeout with no signal)
+#   8  Emacs stopped responding (main thread wedged) mid-wait
 
 set -u -o pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
@@ -66,7 +70,7 @@ TARGET_FILE=$(abspath "$TEST_FILE_RAW") || { echo "ERROR: no such test-file: $TE
 BP_FILE=$(abspath "$BP_FILE_RAW") || { echo "ERROR: no such bp-file: $BP_FILE_RAW" >&2; exit 1; }
 
 echo "==> checking Emacs server..." >&2
-ping_emacs || exit 2
+ping_emacs || exit $?
 
 find_or_open_buffer || exit $?
 
@@ -120,11 +124,33 @@ fi
 # ---------------------------------------------------------------------------
 echo "==> waiting for the breakpoint to hit (timeout ${HIT_TIMEOUT}s; this runs" >&2
 echo "    a real test through to that point, browser automation included)..." >&2
-stopped_form='(progn (require (quote dape) nil t) (if (dape--live-connection (quote stopped) t) t nil))'
+# Tri-state in one round trip: "stopped" (breakpoint hit), "alive" (still
+# running, keep waiting), or "dead" (no live dape connection at all --
+# the JVM/browser exited or the debug adapter crashed). Checking liveness
+# here, not just stopped-ness, means a dropped connection is caught
+# immediately instead of only after the full hit-timeout silently ticks by
+# with nothing left to wait on.
+status_form='
+(progn
+  (require (quote dape) nil t)
+  (cond ((dape--live-connection (quote stopped) t) "stopped")
+        ((dape--live-connection nil t) "alive")
+        (t "dead")))
+'
 elapsed=0
 while :; do
-  stopped=$(eeval "$stopped_form")
-  [ "$stopped" = "t" ] && break
+  raw=$(eeval "$status_form")
+  rc=$?
+  status=$(unquote "$raw")
+  if [ "$rc" -eq 124 ]; then
+    echo "ERROR: Emacs stopped responding while waiting for the breakpoint to be hit (no reply within ${EMACSCLIENT_TIMEOUT}s). Wedged main thread -- check the target Emacs directly." >&2
+    exit 8
+  fi
+  [ "$status" = "stopped" ] && break
+  if [ "$status" = "dead" ]; then
+    echo "ERROR: the debug connection died while waiting for the breakpoint to be hit (no live dape connection left) -- the JVM/browser under test likely exited or the debug adapter crashed." >&2
+    exit 7
+  fi
   if [ "$elapsed" -ge "$HIT_TIMEOUT" ]; then
     echo "ERROR: hit-timeout (${HIT_TIMEOUT}s) exceeded waiting for the breakpoint to be hit" >&2
     exit 5

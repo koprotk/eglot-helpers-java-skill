@@ -50,6 +50,34 @@ manages; if none, open the target file and wait for `eglot-ensure` to
 attach. **Cold start can take minutes** on a large Maven project — the
 default timeouts (300s) reflect that; don't cut them short reflexively.
 
+### If the Eglot connection dies or Emacs itself wedges
+
+Every `emacsclient --eval` call goes through `lib.sh`'s `eeval`, which
+enforces its own timeout (default 20s, override via `EMACSCLIENT_TIMEOUT`)
+independent of whatever timeout you pass the script. This exists because
+"no answer yet" and "still working" are not the same thing: if the target
+Emacs's main thread gets wedged on a stuck synchronous call (a dying
+JDTLS/eglot connection is the common cause), a naive polling loop reads
+that identically to "not ready yet" and silently waits out its *entire*
+nominal timeout before reporting anything — which is exactly what
+motivated this. All three scripts now fail fast instead, with two new
+exit codes that recur across them:
+
+- **Emacs unresponsive** (main thread wedged, no reply within
+  `EMACSCLIENT_TIMEOUT`s on even a trivial check) — reported the moment a
+  poll times out, not at the end of the script's own budget.
+- **Connection died** (Emacs itself is fine, but the Eglot/JDTLS or
+  dape/debug connection's process is no longer live) — checked
+  periodically during long waits (`run-and-read.sh`'s run-wait,
+  `debug-eval.sh`'s breakpoint-hit wait).
+
+Neither case is auto-recovered — killing our side of a hung `--eval`
+does **not** abort the evaluation on the Emacs side (there's no cancel
+signal for that), so a wedged Emacs can stay wedged for whatever you try
+next too. Surface the error text to the user; the usual fix is
+interactive, in that Emacs: `C-g`, `M-x eglot-reconnect`, or
+`eglot-helpers-java-restart-server-clean`.
+
 ---
 
 ## `build-check.sh` — compile check
@@ -78,7 +106,8 @@ your edit.
 Exit codes: `0` finished (even on `Build status: FAILED` — that is real
 signal in the text, not a script failure), `1` bad args, `2` emacsclient
 unreachable, `3` cold-start timeout, `4` no active Eglot server on the
-buffer.
+buffer, `8` Emacs stopped responding before the build request returned —
+see "If the Eglot connection dies or Emacs itself wedges" above.
 
 ## `run-and-read.sh` — run a test class or method
 
@@ -154,6 +183,8 @@ Non-zero exits mean something went wrong *before* you got a result:
 | 3 | Cold start: JDTLS never attached within the timeout |
 | 4 | No compilation buffer appeared after triggering the run |
 | 5 | Compilation buffer never reached a finished state within the timeout |
+| 7 | Eglot's connection to JDTLS died mid-run, caught by a periodic health check (every 10s) instead of silently waiting out the full run-timeout |
+| 8 | Emacs stopped responding (main thread wedged) mid-run |
 
 In all of these, stderr has a specific one-line reason — surface it to the
 user rather than guessing.
@@ -207,3 +238,5 @@ Exit codes:
 | 4 | Starting the debug session failed (e.g. debug/test plugin not loaded) |
 | 5 | Timed out waiting for the breakpoint to be hit |
 | 6 | Timed out waiting for the evaluate result to appear |
+| 7 | The dape/JDTLS debug connection died while waiting for the breakpoint (checked every poll, not just at timeout) |
+| 8 | Emacs stopped responding (main thread wedged) mid-wait |

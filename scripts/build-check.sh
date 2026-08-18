@@ -18,6 +18,10 @@
 #   2  emacsclient unreachable
 #   3  timed out waiting for JDTLS to attach (cold start)
 #   4  no active Eglot server on the target buffer after find/open
+#   8  Emacs stopped responding (main thread wedged) before the
+#      java/buildWorkspace request returned -- see lib.sh's eeval. Its own
+#      :timeout is a *request*, not a guarantee; a connection that dies
+#      mid-request can still leave Emacs blocked past it.
 
 set -u -o pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
@@ -49,7 +53,7 @@ PROJECT_ROOT=$(abspath "$PROJECT_ROOT_RAW") || { echo "ERROR: no such project-ro
 TARGET_FILE=$(abspath "$TARGET_FILE_RAW") || { echo "ERROR: no such target-java-file: $TARGET_FILE_RAW" >&2; exit 1; }
 
 echo "==> checking Emacs server..." >&2
-ping_emacs || exit 2
+ping_emacs || exit $?
 
 find_or_open_buffer || exit $?
 
@@ -58,6 +62,11 @@ has_server_form=$(render_form '
   (and (eglot-current-server) t))
 ' '@@FILE@@' "$BUFFER_FILE")
 has_server=$(eeval "$has_server_form")
+has_server_rc=$?
+if [ "$has_server_rc" -eq 124 ]; then
+  echo "ERROR: Emacs stopped responding on a trivial check right before the build request. Wedged main thread -- check the target Emacs directly." >&2
+  exit 8
+fi
 if [ "$has_server" != "t" ]; then
   echo "ERROR: no active Eglot server on $BUFFER_FILE" >&2
   exit 4
@@ -111,7 +120,19 @@ build_form=$(render_form '
 ' '@@FILE@@' "$BUFFER_FILE" '@@STATUSFILE@@' "$STATUS_FILE" '@@DIAGFILE@@' "$DIAG_FILE")
 build_form=${build_form//@@FULL@@/$FULL_LISP}
 build_form=${build_form//@@REQTIMEOUT@@/$REQUEST_TIMEOUT}
-eeval "$build_form" >/dev/null
+# jsonrpc-request's own :timeout above is a *request*, not a guarantee --
+# if the connection dies in a way that doesn't trip it cleanly, the
+# synchronous eval (and Emacs's main thread with it) can hang past
+# REQUEST_TIMEOUT anyway. Give eeval a ceiling of REQUEST_TIMEOUT plus
+# generous margin so we still notice and fail fast instead of hanging
+# indefinitely on top of jsonrpc's own wait.
+eeval "$build_form" $((REQUEST_TIMEOUT + 30)) >/dev/null
+build_rc=$?
+if [ "$build_rc" -eq 124 ]; then
+  echo "ERROR: Emacs stopped responding during java/buildWorkspace (no reply within $((REQUEST_TIMEOUT + 30))s) -- past jsonrpc's own ${REQUEST_TIMEOUT}s request timeout, so the connection likely died/wedged rather than the build genuinely running long. The Emacs main thread may still be stuck; check it directly (C-g, M-x eglot-reconnect, or restart JDTLS) before retrying." >&2
+  rm -f "$STATUS_FILE" "$DIAG_FILE"
+  exit 8
+fi
 
 status=$(cat "$STATUS_FILE")
 rm -f "$STATUS_FILE"

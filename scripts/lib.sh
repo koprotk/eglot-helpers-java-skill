@@ -30,15 +30,94 @@ unquote() {
   printf '%s' "$s"
 }
 
+# Per-call ceiling for emacsclient --eval, in seconds. A healthy call
+# returns in well under a second -- this exists purely to catch an Emacs
+# whose main thread is wedged (a synchronous LSP/JDTLS call that never
+# returns is the recurring cause here) so a polling loop can detect that
+# and fail fast instead of treating "no answer yet" the same as "not ready
+# yet" and burning its own timeout budget one hung eval at a time. Override
+# per-call by passing a second argument to eeval, or globally via the
+# EMACSCLIENT_TIMEOUT env var.
+EMACSCLIENT_TIMEOUT=${EMACSCLIENT_TIMEOUT:-20}
+
+# eeval FORM [TIMEOUT_SECONDS]
+# stdout is whatever emacsclient printed. Exit status:
+#   0    emacsclient returned normally (its own reply, unexamined)
+#   124  FORM did not come back within TIMEOUT_SECONDS -- Emacs itself is
+#        unresponsive, not merely "still working". Killing our side does
+#        NOT abort the evaluation on the Emacs side (emacsclient --eval has
+#        no cancel signal) -- Emacs can stay wedged for anything that talks
+#        to it afterwards too. Callers must check for 124 explicitly and
+#        bail rather than keep polling.
+#   *    whatever emacsclient itself exited with (e.g. connection refused)
 eeval() {
-  emacsclient --eval "$1"
+  local form=$1
+  local timeout_s=${2:-$EMACSCLIENT_TIMEOUT}
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$timeout_s" emacsclient --eval "$form"
+    return $?
+  fi
+  if command -v gtimeout >/dev/null 2>&1; then
+    gtimeout "$timeout_s" emacsclient --eval "$form"
+    return $?
+  fi
+  # Stock macOS ships neither `timeout` nor `gtimeout` (that's coreutils) --
+  # do the same job by hand: background the call, poll for it to finish,
+  # hard-kill and report 124 if it outlives the budget.
+  local out
+  out=$(mktemp)
+  emacsclient --eval "$form" >"$out" 2>&1 &
+  local pid=$! waited=0
+  while kill -0 "$pid" 2>/dev/null; do
+    if [ "$waited" -ge "$timeout_s" ]; then
+      kill -9 "$pid" 2>/dev/null
+      wait "$pid" 2>/dev/null
+      rm -f "$out"
+      return 124
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  wait "$pid"
+  local rc=$?
+  cat "$out"
+  rm -f "$out"
+  return "$rc"
 }
 
 ping_emacs() {
-  if ! eeval 'nil' >/dev/null 2>&1; then
-    echo "ERROR: emacsclient can't reach an Emacs server. Is (server-start) active in the target Emacs?" >&2
-    return 2
-  fi
+  eeval 'nil' >/dev/null 2>&1
+  local rc=$?
+  case "$rc" in
+    0) return 0 ;;
+    124)
+      echo "ERROR: emacsclient timed out after ${EMACSCLIENT_TIMEOUT}s on a trivial eval -- Emacs is running but its main thread is stuck (a wedged synchronous call, often JDTLS/eglot, is the usual cause). Fix that in the target Emacs directly (C-g, M-x eglot-reconnect, or restart JDTLS) before retrying." >&2
+      return 8
+      ;;
+    *)
+      echo "ERROR: emacsclient can't reach an Emacs server. Is (server-start) active in the target Emacs?" >&2
+      return 2
+      ;;
+  esac
+}
+
+# eglot_alive FILE -> prints "t" if FILE's buffer has a live Eglot server
+# (the LSP connection's process is still running), "nil" otherwise. Exit
+# status follows eeval's -- 124 means Emacs itself didn't answer, which is
+# a different failure than "answered nil" and must be handled separately.
+eglot_alive() {
+  local form
+  form=$(render_form '
+(let ((buf (get-file-buffer "@@FILE@@")))
+  (if (and buf
+           (with-current-buffer buf
+             (let ((s (and (fboundp (quote eglot-current-server)) (eglot-current-server))))
+               (and s (let ((proc (jsonrpc--process s)))
+                        (and proc (process-live-p proc)))))))
+      "t"
+    "nil"))
+' '@@FILE@@' "$1")
+  eeval "$form"
 }
 
 # Escape a raw string for safe embedding inside a double-quoted Elisp string
@@ -92,7 +171,13 @@ find_or_open_buffer() {
                  return f)
         "")))
 ' '@@ROOT@@' "$PROJECT_ROOT")
-  BUFFER_FILE=$(unquote "$(eeval "$find_form")")
+  local find_raw
+  find_raw=$(eeval "$find_form")
+  if [ $? -eq 124 ]; then
+    echo "ERROR: Emacs didn't respond to a trivial buffer lookup (no reply within ${EMACSCLIENT_TIMEOUT}s) -- its main thread is wedged, not just slow. Check the target Emacs directly." >&2
+    return 8
+  fi
+  BUFFER_FILE=$(unquote "$find_raw")
 
   if [ -n "$BUFFER_FILE" ]; then
     echo "==> found managed buffer: $BUFFER_FILE" >&2
@@ -118,8 +203,13 @@ find_or_open_buffer() {
 ' '@@FILE@@' "$BUFFER_FILE")
   local elapsed=0
   while :; do
-    local ready
+    local ready rc
     ready=$(eeval "$ready_form")
+    rc=$?
+    if [ "$rc" -eq 124 ]; then
+      echo "ERROR: Emacs stopped responding while waiting for JDTLS to attach (no reply within ${EMACSCLIENT_TIMEOUT}s on a trivial check) -- not going to keep polling a wedged Emacs for the rest of the cold-start budget. Check the target Emacs directly." >&2
+      return 8
+    fi
     [ "$ready" = "t" ] && break
     if [ "$elapsed" -ge "$COLD_TIMEOUT" ]; then
       echo "ERROR: timed out after ${COLD_TIMEOUT}s waiting for JDTLS to attach to $BUFFER_FILE" >&2

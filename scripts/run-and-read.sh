@@ -17,6 +17,10 @@
 #   3  timed out waiting for JDTLS to attach (cold start)
 #   4  no compilation buffer appeared after triggering the run
 #   5  run-timeout exceeded waiting for the compilation to finish
+#   7  Eglot's connection to JDTLS died mid-run (server process no longer
+#      live) -- caught early via a periodic health check instead of
+#      silently waiting out the full run-timeout with no signal
+#   8  Emacs stopped responding (main thread wedged) mid-run
 
 set -u -o pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
@@ -61,7 +65,7 @@ PROJECT_ROOT=$(abspath "$PROJECT_ROOT_RAW") || { echo "ERROR: no such project-ro
 TARGET_FILE=$(abspath "$TARGET_FILE_RAW") || { echo "ERROR: no such target-java-file: $TARGET_FILE_RAW" >&2; exit 1; }
 
 echo "==> checking Emacs server..." >&2
-ping_emacs || exit 2
+ping_emacs || exit $?
 
 find_or_open_buffer || exit $?
 
@@ -145,15 +149,40 @@ hook_form=$(render_form '
 eeval "$hook_form" >/dev/null
 
 echo "==> waiting for the run to finish (timeout ${RUN_TIMEOUT}s)..." >&2
+# The sentinel check itself is pure filesystem polling -- no emacsclient
+# call, so it cannot hang. But that also means it gives no signal if the
+# Eglot/JDTLS connection dies mid-run (this is the case that motivated
+# adding it: a lost connection was only discovered after the full
+# run-timeout had silently ticked by). Interleave a cheap health check
+# every HEALTH_INTERVAL seconds so a dead connection surfaces immediately
+# instead of at the very end of the budget.
+HEALTH_INTERVAL=10
 elapsed=0
+since_health=0
 while [ ! -f "$SENTINEL_FILE" ]; do
   if [ "$elapsed" -ge "$RUN_TIMEOUT" ]; then
     echo "ERROR: run-timeout (${RUN_TIMEOUT}s) exceeded waiting for $COMP_BUFFER to finish" >&2
     rm -f "$SENTINEL_FILE"
     exit 5
   fi
+  if [ "$since_health" -ge "$HEALTH_INTERVAL" ]; then
+    since_health=0
+    alive=$(eglot_alive "$BUFFER_FILE")
+    alive_rc=$?
+    if [ "$alive_rc" -eq 124 ]; then
+      echo "ERROR: Emacs stopped responding while waiting for $COMP_BUFFER to finish (no reply within ${EMACSCLIENT_TIMEOUT}s on a trivial check). Not safe to keep waiting on a wedged Emacs -- check it directly." >&2
+      rm -f "$SENTINEL_FILE"
+      exit 8
+    fi
+    if [ "$alive" != "t" ]; then
+      echo "ERROR: Eglot's connection to JDTLS died while waiting for $COMP_BUFFER to finish (server process no longer live). The compilation buffer may be orphaned -- restart the connection (M-x eglot-reconnect or eglot-helpers-java-restart-server-clean) and retry." >&2
+      rm -f "$SENTINEL_FILE"
+      exit 7
+    fi
+  fi
   sleep 1
   elapsed=$((elapsed + 1))
+  since_health=$((since_health + 1))
 done
 rm -f "$SENTINEL_FILE"
 
