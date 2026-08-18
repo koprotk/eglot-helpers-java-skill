@@ -101,21 +101,29 @@ ping_emacs() {
   esac
 }
 
-# eglot_alive FILE -> prints "t" if FILE's buffer has a live Eglot server
-# (the LSP connection's process is still running), "nil" otherwise. Exit
-# status follows eeval's -- 124 means Emacs itself didn't answer, which is
-# a different failure than "answered nil" and must be handled separately.
+# eglot_alive FILE -> prints t (bare symbol, matching every other t/nil
+# check in this file -- NOT the string "t") if FILE's buffer has a live
+# Eglot server (the LSP connection's process is still running), nil
+# otherwise. Exit status follows eeval's -- 124 means Emacs itself didn't
+# answer, which is a different failure than "answered nil" and must be
+# handled separately.
+#
+# NOTE: an earlier version of this form returned the elisp string
+# literals "t"/"nil" instead of the bare symbols t/nil. emacsclient prints
+# strings with their quotes, so callers doing `[ "$alive" = "t" ]` were
+# comparing against the literal 3 characters "t" (quote-t-quote) and it
+# never matched -- eglot_alive reported "dead" on every call, alive or
+# not. Bare symbols print unquoted, matching e.g. find_or_open_buffer's
+# `(and (eglot-current-server) t)` below.
 eglot_alive() {
   local form
   form=$(render_form '
 (let ((buf (get-file-buffer "@@FILE@@")))
-  (if (and buf
-           (with-current-buffer buf
-             (let ((s (and (fboundp (quote eglot-current-server)) (eglot-current-server))))
-               (and s (let ((proc (jsonrpc--process s)))
-                        (and proc (process-live-p proc)))))))
-      "t"
-    "nil"))
+  (and buf
+       (with-current-buffer buf
+         (let ((s (and (fboundp (quote eglot-current-server)) (eglot-current-server))))
+           (and s (let ((proc (jsonrpc--process s)))
+                    (and proc (process-live-p proc) t)))))))
 ' '@@FILE@@' "$1")
   eeval "$form"
 }
