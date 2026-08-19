@@ -30,7 +30,7 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 # shellcheck source=lib.sh
 source "$SCRIPT_DIR/lib.sh"
 
-DEFAULT_RUN_TIMEOUT=700
+DEFAULT_RUN_TIMEOUT=900
 
 usage() {
   cat >&2 <<EOF
