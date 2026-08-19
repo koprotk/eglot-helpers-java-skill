@@ -228,6 +228,21 @@ that reason, it exits cleanly with a pointer to try
 `eglot-helpers-java-restart-server-clean`) interactively first, rather than
 attempting to replicate that fallback headlessly.
 
+**Starting the debug session already retries a bounded 3 attempts, ~8s
+apart, before giving up (exit 4).** A timeout, or a JDTLS-side `Index 0
+out of bounds for length 0` from `vscode.java.test.junit.argument`, on
+the first attempt or two is expected right after a JDTLS restart or right
+after a new test file was added — JDTLS is still re-indexing and briefly
+resolves zero test items for anything. That's what the retry rides out.
+**Do not wrap another retry loop around this script** if it still fails
+— exit 4 after 3 spaced attempts means it's a real problem (wrong `fqmn`,
+plugin genuinely not loaded), not a timing hiccup, and hammering the same
+call faster doesn't fix indexing lag (seen in the wild: an external loop
+retried the identical failing call 25+ times with no backoff and never
+got anywhere — same anti-pattern as hand-rolling the compilation-finish
+check `run-and-read.sh` already solves; use the script, don't reinvent
+its polling).
+
 Exit codes:
 
 | Exit | Meaning |

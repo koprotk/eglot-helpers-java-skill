@@ -17,8 +17,13 @@
 #   1  usage error
 #   2  emacsclient unreachable
 #   3  timed out waiting for JDTLS to attach (cold start)
-#   4  starting the debug session failed (e.g. debug plugin not loaded --
-#      this script does not attempt the interactive Maven-debug fallback)
+#   4  starting the debug session failed after 3 spaced-out attempts (e.g.
+#      debug plugin not loaded, or a real launch-config error -- this
+#      script does not attempt the interactive Maven-debug fallback). A
+#      timeout or JDTLS's own "Index 0 out of bounds for length 0" on the
+#      first attempt or two is expected right after a JDTLS restart or a
+#      newly-added test file (still re-indexing) and is retried
+#      automatically -- this code only fires once that retry is exhausted.
 #   5  timed out waiting for the breakpoint to be hit
 #   6  timed out waiting for the evaluate result to appear
 #   7  the dape/JDTLS debug connection died while waiting for the
@@ -101,6 +106,18 @@ fi
 # eglot-helpers-java-debug-test-method uses for the LSP/dape fast path.
 # This script does not replicate the interactive Maven-debug fallback --
 # if the JDTLS debug plugin is not loaded, this fails clearly instead.
+#
+# Bounded retry: right after a JDTLS restart, or right after a new test
+# file is added, `vscode.java.test.junit.argument' (what this calls under
+# the hood) can time out, or come back with a JDTLS-side "Index 0 out of
+# bounds for length 0" (it resolved zero test items for the target and
+# then indexed into the empty list) until JDTLS finishes re-indexing the
+# project. Neither is fixed by hammering it faster -- observed in the
+# wild as an external caller retrying the same call 25+ times back-to-back
+# with no backoff. A few *spaced* attempts is what actually rides out that
+# window; anything still failing after that is a real problem (wrong
+# fqmn, plugin genuinely not loaded), not a timing hiccup, and callers
+# should not wrap another retry loop around this one.
 # ---------------------------------------------------------------------------
 echo "==> starting debug session for ${FQMN}..." >&2
 start_form=$(render_form '
@@ -111,9 +128,33 @@ start_form=$(render_form '
         "t")
     (error (format "ERROR: %s" (error-message-string err)))))
 ' '@@FILE@@' "$BUFFER_FILE" '@@FQMN@@' "$FQMN")
-start_result=$(unquote "$(eeval "$start_form")")
+
+LAUNCH_ATTEMPTS=3
+LAUNCH_RETRY_DELAY=8
+attempt=1
+start_result=""
+while :; do
+  raw=$(eeval "$start_form")
+  rc=$?
+  if [ "$rc" -eq 124 ]; then
+    echo "ERROR: Emacs stopped responding while starting the debug session (no reply within ${EMACSCLIENT_TIMEOUT}s). Wedged main thread -- check the target Emacs directly." >&2
+    exit 8
+  fi
+  start_result=$(unquote "$raw")
+  [ "$start_result" = "t" ] && break
+  if [ "$attempt" -ge "$LAUNCH_ATTEMPTS" ]; then
+    break
+  fi
+  echo "==> attempt ${attempt}/${LAUNCH_ATTEMPTS} failed to start debug session: $start_result" >&2
+  echo "    retrying in ${LAUNCH_RETRY_DELAY}s -- a timeout or a JDTLS-side 'Index 0 out" >&2
+  echo "    of bounds' right after a restart or a newly-added test file usually just" >&2
+  echo "    means JDTLS is still (re)indexing, not that the connection is broken." >&2
+  sleep "$LAUNCH_RETRY_DELAY"
+  attempt=$((attempt + 1))
+done
+
 if [ "$start_result" != "t" ]; then
-  echo "ERROR: failed to start debug session: $start_result" >&2
+  echo "ERROR: failed to start debug session after ${LAUNCH_ATTEMPTS} attempts: $start_result" >&2
   echo "       (this script does not fall back to Maven surefire debug --" >&2
   echo "        try M-x eglot-helpers-java-reload-bundles interactively first)" >&2
   exit 4
