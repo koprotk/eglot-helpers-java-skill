@@ -6,7 +6,7 @@
 #
 # Usage:
 #   run-and-read.sh <project-root> <target-java-file> <fqn> <class|method> \
-#                    [run-timeout-seconds=300] [cold-start-timeout-seconds=300]
+#                    [run-timeout-seconds=700] [cold-start-timeout-seconds=300]
 #
 # Exit codes (about ORCHESTRATION, not test pass/fail — a finished
 # compilation buffer with failing tests still exits 0; the failure is in
@@ -29,7 +29,7 @@ source "$SCRIPT_DIR/lib.sh"
 
 usage() {
   cat >&2 <<'EOF'
-Usage: run-and-read.sh <project-root> <target-java-file> <fqn> <class|method> [run-timeout=300] [cold-start-timeout=300]
+Usage: run-and-read.sh <project-root> <target-java-file> <fqn> <class|method> [run-timeout=700] [cold-start-timeout=300]
 
   project-root        absolute path to the Maven project root (has pom.xml/mvnw)
   target-java-file    absolute path to the .java file containing the class/method
@@ -48,7 +48,7 @@ PROJECT_ROOT_RAW=$1
 TARGET_FILE_RAW=$2
 FQN=$3
 KIND=$4
-RUN_TIMEOUT=${5:-300}
+RUN_TIMEOUT=${5:-700}
 COLD_TIMEOUT=${6:-300}
 
 case "$KIND" in

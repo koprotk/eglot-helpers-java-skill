@@ -121,7 +121,9 @@ scripts/run-and-read.sh \
   <project-root> <path/to/File.java> <pkg.Class#method> method
 ```
 
-Optional 5th/6th args override the default 300s timeouts:
+Optional 5th/6th args override the defaults (run-timeout 700s,
+cold-start-timeout 300s — run-timeout was bumped from 300s after real
+tests were seen running close to double that):
 ```bash
 run-and-read.sh <project-root> <file> <fqn> <class|method> [run-timeout] [cold-start-timeout]
 ```
