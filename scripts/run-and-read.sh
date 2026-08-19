@@ -6,7 +6,10 @@
 #
 # Usage:
 #   run-and-read.sh <project-root> <target-java-file> <fqn> <class|method> \
-#                    [run-timeout-seconds=700] [cold-start-timeout-seconds=300]
+#                    [run-timeout-seconds] [cold-start-timeout-seconds]
+#   (defaults: DEFAULT_RUN_TIMEOUT below, DEFAULT_COLD_TIMEOUT in lib.sh --
+#    `usage()` prints the live values, this comment intentionally doesn't
+#    repeat the numbers so it can't drift out of sync with them)
 #
 # Exit codes (about ORCHESTRATION, not test pass/fail — a finished
 # compilation buffer with failing tests still exits 0; the failure is in
@@ -27,9 +30,11 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 # shellcheck source=lib.sh
 source "$SCRIPT_DIR/lib.sh"
 
+DEFAULT_RUN_TIMEOUT=700
+
 usage() {
-  cat >&2 <<'EOF'
-Usage: run-and-read.sh <project-root> <target-java-file> <fqn> <class|method> [run-timeout=700] [cold-start-timeout=300]
+  cat >&2 <<EOF
+Usage: run-and-read.sh <project-root> <target-java-file> <fqn> <class|method> [run-timeout=$DEFAULT_RUN_TIMEOUT] [cold-start-timeout=$DEFAULT_COLD_TIMEOUT]
 
   project-root        absolute path to the Maven project root (has pom.xml/mvnw)
   target-java-file    absolute path to the .java file containing the class/method
@@ -48,8 +53,8 @@ PROJECT_ROOT_RAW=$1
 TARGET_FILE_RAW=$2
 FQN=$3
 KIND=$4
-RUN_TIMEOUT=${5:-700}
-COLD_TIMEOUT=${6:-300}
+RUN_TIMEOUT=${5:-$DEFAULT_RUN_TIMEOUT}
+COLD_TIMEOUT=${6:-$DEFAULT_COLD_TIMEOUT}
 
 case "$KIND" in
   class)  LEVEL=3 ;;

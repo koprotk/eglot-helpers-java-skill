@@ -8,7 +8,10 @@
 #
 # Usage:
 #   build-check.sh <project-root> <target-java-file> [full=0] \
-#                  [request-timeout-seconds=120] [cold-start-timeout-seconds=300]
+#                  [request-timeout-seconds] [cold-start-timeout-seconds]
+#   (defaults: DEFAULT_REQUEST_TIMEOUT below, DEFAULT_COLD_TIMEOUT in lib.sh --
+#    `usage()` prints the live values, this comment intentionally doesn't
+#    repeat the numbers so it can't drift out of sync with them)
 #
 # Exit codes (about ORCHESTRATION, not compile outcome — a FAILED build
 # status still exits 0; that's real signal in the printed text, not a
@@ -28,9 +31,11 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 # shellcheck source=lib.sh
 source "$SCRIPT_DIR/lib.sh"
 
+DEFAULT_REQUEST_TIMEOUT=120
+
 usage() {
-  cat >&2 <<'EOF'
-Usage: build-check.sh <project-root> <target-java-file> [full=0] [request-timeout=120] [cold-start-timeout=300]
+  cat >&2 <<EOF
+Usage: build-check.sh <project-root> <target-java-file> [full=0] [request-timeout=$DEFAULT_REQUEST_TIMEOUT] [cold-start-timeout=$DEFAULT_COLD_TIMEOUT]
 
   project-root        absolute path to the Maven project root (has pom.xml/mvnw)
   target-java-file    absolute path to the .java file to check
@@ -46,8 +51,8 @@ fi
 PROJECT_ROOT_RAW=$1
 TARGET_FILE_RAW=$2
 FULL=${3:-0}
-REQUEST_TIMEOUT=${4:-120}
-COLD_TIMEOUT=${5:-300}
+REQUEST_TIMEOUT=${4:-$DEFAULT_REQUEST_TIMEOUT}
+COLD_TIMEOUT=${5:-$DEFAULT_COLD_TIMEOUT}
 
 PROJECT_ROOT=$(abspath "$PROJECT_ROOT_RAW") || { echo "ERROR: no such project-root: $PROJECT_ROOT_RAW" >&2; exit 1; }
 TARGET_FILE=$(abspath "$TARGET_FILE_RAW") || { echo "ERROR: no such target-java-file: $TARGET_FILE_RAW" >&2; exit 1; }

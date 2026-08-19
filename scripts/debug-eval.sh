@@ -8,7 +8,10 @@
 #
 # Usage:
 #   debug-eval.sh <project-root> <test-file> <fqmn> <bp-file> <bp-line> <expression> \
-#                 [hit-timeout=180] [cold-start-timeout=300]
+#                 [hit-timeout] [cold-start-timeout]
+#   (defaults: DEFAULT_HIT_TIMEOUT below, DEFAULT_COLD_TIMEOUT in lib.sh --
+#    `usage()` prints the live values, this comment intentionally doesn't
+#    repeat the numbers so it can't drift out of sync with them)
 #
 # Exit codes (about ORCHESTRATION, not what the expression evaluates to —
 # an expression that throws inside the debuggee still exits 0; the error
@@ -36,9 +39,11 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 # shellcheck source=lib.sh
 source "$SCRIPT_DIR/lib.sh"
 
+DEFAULT_HIT_TIMEOUT=180
+
 usage() {
-  cat >&2 <<'EOF'
-Usage: debug-eval.sh <project-root> <test-file> <fqmn> <bp-file> <bp-line> <expression> [hit-timeout=180] [cold-start-timeout=300]
+  cat >&2 <<EOF
+Usage: debug-eval.sh <project-root> <test-file> <fqmn> <bp-file> <bp-line> <expression> [hit-timeout=$DEFAULT_HIT_TIMEOUT] [cold-start-timeout=$DEFAULT_COLD_TIMEOUT]
 
   project-root   absolute path to the Maven project root (has pom.xml/mvnw)
   test-file      absolute path to the .java file declaring the test method
@@ -67,8 +72,8 @@ FQMN=$3
 BP_FILE_RAW=$4
 BP_LINE=$5
 EXPRESSION=$6
-HIT_TIMEOUT=${7:-180}
-COLD_TIMEOUT=${8:-300}
+HIT_TIMEOUT=${7:-$DEFAULT_HIT_TIMEOUT}
+COLD_TIMEOUT=${8:-$DEFAULT_COLD_TIMEOUT}
 
 PROJECT_ROOT=$(abspath "$PROJECT_ROOT_RAW") || { echo "ERROR: no such project-root: $PROJECT_ROOT_RAW" >&2; exit 1; }
 TARGET_FILE=$(abspath "$TEST_FILE_RAW") || { echo "ERROR: no such test-file: $TEST_FILE_RAW" >&2; exit 1; }

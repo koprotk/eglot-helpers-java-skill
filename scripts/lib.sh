@@ -30,6 +30,12 @@ unquote() {
   printf '%s' "$s"
 }
 
+# Default cold-start-timeout (seconds waiting for JDTLS to attach), shared
+# by all three scripts since it's the same wait on the same thing in each.
+# One place to change it; each script's usage() text and arg-default line
+# both interpolate this instead of repeating the literal.
+DEFAULT_COLD_TIMEOUT=${DEFAULT_COLD_TIMEOUT:-300}
+
 # Per-call ceiling for emacsclient --eval, in seconds. A healthy call
 # returns in well under a second -- this exists purely to catch an Emacs
 # whose main thread is wedged (a synchronous LSP/JDTLS call that never
