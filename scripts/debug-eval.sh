@@ -32,7 +32,10 @@
 #   7  the dape/JDTLS debug connection died while waiting for the
 #      breakpoint (caught via a periodic health check instead of silently
 #      waiting out the full hit-timeout with no signal)
-#   8  Emacs stopped responding (main thread wedged) mid-wait
+#   8  Emacs stopped responding (main thread wedged), or was still busy
+#      with the launch call itself when we checked -- see the "Bounded
+#      retry" comment above start_form for why those two cases are not
+#      told apart any further than that
 
 set -u -o pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
@@ -123,6 +126,23 @@ fi
 # window; anything still failing after that is a real problem (wrong
 # fqmn, plugin genuinely not loaded), not a timing hiccup, and callers
 # should not wrap another retry loop around this one.
+#
+# eglot-helpers-java--debug-launch-config's underlying JDTLS calls go
+# through eglot-execute -> eglot--request -> jsonrpc-request, and
+# eglot--request explicitly forwards ":timeout nil" -- that suppresses
+# jsonrpc.el's own 10s default, so the call has NO timeout at all on the
+# Emacs side and can block its main thread indefinitely if JDTLS never
+# answers. Our eeval below has its own client-side ceiling
+# (LAUNCH_REQUEST_TIMEOUT), but that only bounds *our* wait; killing our
+# side of `emacsclient --eval' does not cancel the evaluation running on
+# the Emacs side (no cancel signal exists for that). That matters for
+# what we do next: on a 124 here we do NOT blindly retry, because the
+# first attempt's (dape ...) call might still be silently running --
+# stacking a second launch on top of it, if that first one later succeeds
+# on its own, would start two overlapping debug sessions (two
+# JVMs/browsers). Instead we check whether Emacs is free again at all
+# (ping_emacs) and, if so, whether a session actually showed up before
+# treating it as a normal retryable failure -- see below.
 # ---------------------------------------------------------------------------
 echo "==> starting debug session for ${FQMN}..." >&2
 start_form=$(render_form '
@@ -136,16 +156,47 @@ start_form=$(render_form '
 
 LAUNCH_ATTEMPTS=3
 LAUNCH_RETRY_DELAY=8
+# More room than the default EMACSCLIENT_TIMEOUT before we even consider
+# this particular call slow -- see the no-upstream-timeout note above.
+LAUNCH_REQUEST_TIMEOUT=45
 attempt=1
 start_result=""
 while :; do
-  raw=$(eeval "$start_form")
+  raw=$(eeval "$start_form" "$LAUNCH_REQUEST_TIMEOUT")
   rc=$?
   if [ "$rc" -eq 124 ]; then
-    echo "ERROR: Emacs stopped responding while starting the debug session (no reply within ${EMACSCLIENT_TIMEOUT}s). Wedged main thread -- check the target Emacs directly." >&2
-    exit 8
+    echo "==> emacsclient timed out waiting for the launch call (${LAUNCH_REQUEST_TIMEOUT}s) -- checking whether Emacs is still busy with it..." >&2
+    ping_emacs
+    ping_rc=$?
+    if [ "$ping_rc" -ne 0 ]; then
+      # ping_emacs already printed the specific reason (8 = still
+      # wedged/busy, 2 = unreachable). Not retrying either way: we can't
+      # tell a real wedge apart from the original launch call still being
+      # in flight, and retrying into either case is unsafe.
+      exit "$ping_rc"
+    fi
+    echo "    ...Emacs answered a trivial eval, so the launch call must have already" >&2
+    echo "    finished server-side (elisp is single-threaded) -- we just missed its" >&2
+    echo "    result. Checking whether it actually started a debug session..." >&2
+    found=""
+    for _ in 1 2 3; do
+      conn=$(eeval '
+(progn
+  (require (quote dape) nil t)
+  (if (dape--live-connection nil t) "t" "nil"))
+')
+      [ "$conn" = "t" ] && { found=1; break; }
+      sleep 2
+    done
+    if [ -n "$found" ]; then
+      echo "==> a debug session did start (just after our client gave up waiting on it) -- continuing." >&2
+      start_result="t"
+      break
+    fi
+    start_result="ERROR: launch call finished with no debug session after a ${LAUNCH_REQUEST_TIMEOUT}s emacsclient timeout"
+  else
+    start_result=$(unquote "$raw")
   fi
-  start_result=$(unquote "$raw")
   [ "$start_result" = "t" ] && break
   if [ "$attempt" -ge "$LAUNCH_ATTEMPTS" ]; then
     break
