@@ -198,16 +198,39 @@ find_or_open_buffer() {
     return 0
   fi
 
-  echo "==> none managed yet — opening $TARGET_FILE and calling eglot-ensure..." >&2
+  echo "==> none managed yet — opening $TARGET_FILE and connecting..." >&2
   BUFFER_FILE=$TARGET_FILE
+  # NOT eglot-ensure: its own docstring says so ("it's often wise to use the
+  # interactive command `eglot' instead") -- eglot-ensure defers the actual
+  # connect via a *buffer-local* post-command-hook, which only runs after a
+  # real interactive command loop cycle. A hook added mid `emacsclient
+  # --eval` never gets that cycle -- verified live: it never fires, not even
+  # on later --eval calls in the same session. Net effect when eglot wasn't
+  # already running in this buffer: eglot-ensure schedules a connect that
+  # NEVER happens, and find_or_open_buffer's poll below burns the entire
+  # COLD_TIMEOUT waiting on a connection that was never going to start. This
+  # is exactly why "eglot already running" (warm) works fine but "eglot not
+  # started yet" (cold) hangs until timeout.
+  # Fix: run the same connect eglot-ensure would have deferred, directly,
+  # right now -- eglot--connect's own handshake is async-safe via normal
+  # process-filter/event-loop dispatch (unlike post-command-hook, that keeps
+  # working fine in a daemon between separate --eval calls), so the poll
+  # loop below still works exactly as intended once this actually runs.
   local open_form
   open_form=$(render_form '
 (progn
   (require (quote eglot) nil t)
   (with-current-buffer (find-file-noselect "@@FILE@@")
-    (eglot-ensure)))
+    (unless (eglot-current-server)
+      (condition-case oops
+          (apply (function eglot--connect) (eglot--guess-contact))
+        (error (eglot--warn "%s" (error-message-string oops)))))))
 ' '@@FILE@@' "$BUFFER_FILE")
   eeval "$open_form" >/dev/null
+  if [ $? -eq 124 ]; then
+    echo "ERROR: Emacs stopped responding while starting the Eglot connection (no reply within ${EMACSCLIENT_TIMEOUT}s) -- wedged main thread. Check the target Emacs directly." >&2
+    return 8
+  fi
 
   echo "==> waiting for JDTLS to attach (cold start can take minutes on a large project)..." >&2
   local ready_form
