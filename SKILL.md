@@ -1,6 +1,6 @@
 ---
 name: eglot-java-test
-description: Run a Java test class or method, check that a file compiles, or pause a test at a breakpoint to inspect live state (e.g. read a page's real HTML to derive a Selenium locator), in this project through JDTLS/Eglot/dape (via emacsclient). Use after editing a .java file to verify it compiles, when asked to run a test or a specific test method, to check if a fix passes, to iterate on a Java test failure, or when you would otherwise have to ask the user to manually navigate to a screen and report back a locator/selector — as an alternative to shelling out to mvnw directly or asking the user to drive a manual debug session.
+description: Run a Java test class or method, check that a file compiles, in this project through JDTLS/Eglot (via emacsclient). Use after editing a .java file to verify it compiles, when asked to run a test or a specific test method, to check if a fix passes, to iterate on a Java test failure, or when you would otherwise have to ask the user to manually navigate to a screen and report back a locator/selector (add a page-source print to the test and run it) — as an alternative to shelling out to mvnw directly.
 ---
 
 # eglot-java-test
@@ -22,13 +22,12 @@ This repo IS the skill directory. Either:
 Script paths below are relative to wherever this `SKILL.md` ends up living
 — resolve them against that directory, not the consuming project's root.
 
-Three scripts, pick based on what you actually need:
+Two scripts, pick based on what you actually need:
 
 | Script | Use when | Cost |
 |---|---|---|
 | `scripts/build-check.sh` | You just edited a `.java` file and want to know it still compiles | Cheap — incremental compile via JDTLS's own builder (falls back to a Maven build if no Eglot server is attached) |
 | `scripts/run-and-read.sh` | You need to actually exercise a test class/method | Heavier — spins up a JVM (or Maven) to run it |
-| `scripts/debug-eval.sh` | You need live state at a specific point in a test — e.g. a page's real HTML to derive a locator, instead of asking the user to open devtools | Heaviest — starts a real debug session (browser included), pauses at a breakpoint, evaluates an expression, then tears down |
 
 **Default to `build-check.sh` right after editing a file.** Only reach for
 `run-and-read.sh` when you specifically need test *behavior*, not just
@@ -60,16 +59,15 @@ Emacs's main thread gets wedged on a stuck synchronous call (a dying
 JDTLS/eglot connection is the common cause), a naive polling loop reads
 that identically to "not ready yet" and silently waits out its *entire*
 nominal timeout before reporting anything — which is exactly what
-motivated this. All three scripts now fail fast instead, with two new
+motivated this. Both scripts now fail fast instead, with two new
 exit codes that recur across them:
 
 - **Emacs unresponsive** (main thread wedged, no reply within
   `EMACSCLIENT_TIMEOUT`s on even a trivial check) — reported the moment a
   poll times out, not at the end of the script's own budget.
-- **Connection died** (Emacs itself is fine, but the Eglot/JDTLS or
-  dape/debug connection's process is no longer live) — checked
-  periodically during long waits (`run-and-read.sh`'s run-wait,
-  `debug-eval.sh`'s breakpoint-hit wait).
+- **Connection died** (Emacs itself is fine, but the Eglot/JDTLS
+  connection's process is no longer live) — checked periodically during
+  long waits (`run-and-read.sh`'s run-wait).
 
 Neither case is auto-recovered — killing our side of a hung `--eval`
 does **not** abort the evaluation on the Emacs side (there's no cancel
@@ -216,69 +214,22 @@ Non-zero exits mean something went wrong *before* you got a result:
 In all of these, stderr has a specific one-line reason — surface it to the
 user rather than guessing.
 
-## `debug-eval.sh` — pause at a breakpoint and inspect live state
+## Reading live page HTML (to derive a locator) — no debugger
 
-```bash
-scripts/debug-eval.sh <project-root> <test-file> <fqmn> <bp-file> <bp-line> <expression> [hit-timeout=180] [cold-start-timeout=300]
-```
+Do **not** pause at a breakpoint to inspect state; a debug session is
+fragile and unnecessary. To get a page's real HTML, instead:
 
-For when you would otherwise have to ask the user to manually navigate to a
-screen in the running app and report back an element locator. Instead:
-starts a real dape/JDTLS debug session on `fqmn`, sets a breakpoint at
-`bp-file:bp-line`, waits for it to be hit, evaluates a Java `expression` in
-that paused frame's context, then resumes and tears the whole session down.
+1. Edit the test: right after the navigation call that reaches the screen
+   you care about (before assertions), add a line that dumps the page
+   source, e.g. `System.out.println(getPage().getPageSource());` — read the
+   test's base class to find the project's actual WebDriver accessor
+   (`getPage`, `driver`, ...). `getCurrentUrl()` or a specific `WebElement`
+   works the same way.
+2. Run it with `run-and-read.sh` (method run, usually).
+3. The script prints the full compilation (comint) buffer, so the dumped
+   DOM is in that output. Rescue it from there and derive the locator from
+   the real markup.
+4. Remove the temporary print line once the locator is done.
 
-**Pick the breakpoint line yourself** by reading the test/Screen source —
-put it right after the navigation call that reaches the screen you care
-about, before any assertions. For the expression, `driver.getPageSource()`
-(or whatever the project's WebDriver field/accessor is called — read the
-test's base class to find it) gets you the actual rendered HTML, so you can
-derive a locator directly from real markup instead of asking the user to
-open devtools. `getCurrentUrl()`, or evaluating a specific `WebElement`
-variable already in scope at that line, are also fair game — it is any
-expression valid at that breakpoint, not just page source.
-
-This is the heaviest of the three scripts: a real browser launches and a
-JVM thread sits suspended until the expression resolves. **Do not fire this
-off speculatively** — only when you have a concrete need for live state
-that reading source cannot answer. After the evaluate result comes back,
-the session is resumed and immediately torn down (`dape-continue` then
-`dape-quit`) — this grabs one snapshot and cleans up eagerly, it does not
-wait for or report the test's actual outcome. Use `run-and-read.sh` if you
-need that.
-
-This script does **not** implement the interactive Maven-surefire-debug
-fallback that `eglot-helpers-java-debug-test-method` falls back to when the
-JDTLS debug/test plugin is not loaded — if starting the session fails for
-that reason, it exits cleanly with a pointer to try
-`M-x eglot-helpers-java-reload-bundles` (or
-`eglot-helpers-java-restart-server-clean`) interactively first, rather than
-attempting to replicate that fallback headlessly.
-
-**Starting the debug session already retries a bounded 3 attempts, ~8s
-apart, before giving up (exit 4).** A timeout, or a JDTLS-side `Index 0
-out of bounds for length 0` from `vscode.java.test.junit.argument`, on
-the first attempt or two is expected right after a JDTLS restart or right
-after a new test file was added — JDTLS is still re-indexing and briefly
-resolves zero test items for anything. That's what the retry rides out.
-**Do not wrap another retry loop around this script** if it still fails
-— exit 4 after 3 spaced attempts means it's a real problem (wrong `fqmn`,
-plugin genuinely not loaded), not a timing hiccup, and hammering the same
-call faster doesn't fix indexing lag (seen in the wild: an external loop
-retried the identical failing call 25+ times with no backoff and never
-got anywhere — same anti-pattern as hand-rolling the compilation-finish
-check `run-and-read.sh` already solves; use the script, don't reinvent
-its polling).
-
-Exit codes:
-
-| Exit | Meaning |
-|---|---|
-| 1 | Bad arguments |
-| 2 | `emacsclient` can't reach an Emacs server |
-| 3 | Cold start: JDTLS never attached within the timeout |
-| 4 | Starting the debug session failed (e.g. debug/test plugin not loaded) |
-| 5 | Timed out waiting for the breakpoint to be hit |
-| 6 | Timed out waiting for the evaluate result to appear |
-| 7 | The dape/JDTLS debug connection died while waiting for the breakpoint (checked every poll, not just at timeout) |
-| 8 | Emacs stopped responding (main thread wedged) mid-wait |
+Don't ask the user to open devtools and report back — this gets the same
+info with one test run.
