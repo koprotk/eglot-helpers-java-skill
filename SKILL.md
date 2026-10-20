@@ -164,13 +164,15 @@ Examples: `com.acme.billing.InvoiceServiceTest`,
 ### What it does
 
 1. Finds/opens the managed buffer (see Prerequisites above).
-2. Triggers the run via `eglot-helpers-java--run-test`, the same
+2. Opens the target test class in a new Emacs window (reused if already
+   visible) so the user sees what is about to run. Non-fatal if it fails.
+3. Triggers the run via `eglot-helpers-java--run-test`, the same
    non-interactive function the package's own interactive commands call.
    This resolves launch args via JDTLS's `vscode.java.test.junit.argument`
    LSP command, falling back to `mvnw -Dtest=... test` transparently if the
    test plugin is not loaded in that JDTLS instance — you do not need to
    know or care which path it took; the output tells you.
-3. Finds the compilation buffer that run created (structurally, by mode +
+4. Finds the compilation buffer that run created (structurally, by mode +
    working directory — not by a hardcoded buffer name, since the exact
    name depends on the user's own `compilation-buffer-name-function`
    customization, and the buffer itself is `comint-mode` with
@@ -179,7 +181,7 @@ Examples: `com.acme.billing.InvoiceServiceTest`,
    until it reaches `compile.el`'s own finish sentinel line
    (`Compilation finished`/`Compilation exited abnormally`/`Compilation
    segmentation fault`).
-4. Prints the full buffer text to stdout.
+5. Prints the full buffer text to stdout.
 
 ### Reading the result
 

@@ -75,6 +75,21 @@ ping_emacs || exit $?
 find_or_open_buffer || exit $?
 
 # ---------------------------------------------------------------------------
+# Show the test class in a new window before running, so the user sees what
+# is about to execute. Reuses the window if the buffer is already visible
+# (repeat runs don't pile up splits). Non-fatal: display problems must not
+# block the run itself.
+# ---------------------------------------------------------------------------
+echo "==> opening ${TARGET_FILE##*/} in a new window..." >&2
+show_form=$(render_form '
+(let ((buf (find-file-noselect "@@FILE@@")))
+  (unless (get-buffer-window buf t)
+    (display-buffer buf (quote (display-buffer-pop-up-window))))
+  t)
+' '@@FILE@@' "$TARGET_FILE")
+eeval "$show_form" >/dev/null 2>&1 || echo "WARN: could not open ${TARGET_FILE} in a new window; continuing" >&2
+
+# ---------------------------------------------------------------------------
 # Trigger the run.
 # ---------------------------------------------------------------------------
 echo "==> running ${KIND} ${FQN}..." >&2
