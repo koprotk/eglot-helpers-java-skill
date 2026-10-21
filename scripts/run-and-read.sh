@@ -75,16 +75,26 @@ ping_emacs || exit $?
 find_or_open_buffer || exit $?
 
 # ---------------------------------------------------------------------------
-# Show the test class in a new window before running, so the user sees what
-# is about to execute. Reuses the window if the buffer is already visible
-# (repeat runs don't pile up splits). Non-fatal: display problems must not
-# block the run itself.
+# Show the test class in a window before running, so the user sees what is
+# about to execute. If the buffer is already visible, leave it. Otherwise
+# reuse the window a previous run created (tagged with the window parameter
+# `eglot-java-test') and swap the new class into it, so successive runs of
+# different classes follow along instead of leaving the first class on screen
+# (a plain pop-up per run either piles up splits or silently fails to split
+# and shows nothing). First run pops up a window and tags it. Non-fatal:
+# display problems must not block the run itself.
 # ---------------------------------------------------------------------------
-echo "==> opening ${TARGET_FILE##*/} in a new window..." >&2
+echo "==> opening ${TARGET_FILE##*/} in a window..." >&2
 show_form=$(render_form '
 (let ((buf (find-file-noselect "@@FILE@@")))
   (unless (get-buffer-window buf t)
-    (display-buffer buf (quote (display-buffer-pop-up-window))))
+    (let ((win (seq-find (lambda (w) (window-parameter w (quote eglot-java-test)))
+                         (window-list nil (quote no-mini)))))
+      (if win
+          (set-window-buffer win buf)
+        (setq win (or (display-buffer buf (quote (display-buffer-pop-up-window)))
+                      (display-buffer buf (quote (display-buffer-use-some-window)))))
+        (when win (set-window-parameter win (quote eglot-java-test) t)))))
   t)
 ' '@@FILE@@' "$TARGET_FILE")
 eeval "$show_form" >/dev/null 2>&1 || echo "WARN: could not open ${TARGET_FILE} in a new window; continuing" >&2
