@@ -97,6 +97,18 @@ OUTPUT_GREP='FAILED\|ERROR' OUTPUT_TAIL=40 scripts/run-and-read.sh ...
 Prefer these over shell post-processing. Start with the filtered view; fall
 back to the full buffer only if the filter hides what you need.
 
+**Do not poll the script's output file.** The scripts already block until the
+Maven/comint run finishes and print only afterwards, so a wrapper like
+`until grep -q "Comint finished" out; do sleep 5; done; grep ... out | tail`
+is redundant. Run the script once (in the foreground, or in the background
+and wait for its completion notification), with the filter on the call:
+
+```bash
+OUTPUT_GREP='BUILD SUCCESS\|BUILD FAILURE\|Tests run:\|Test result was\|PAGE_SOURCE_START' \
+OUTPUT_TAIL=40 \
+scripts/run-and-read.sh <project-root> <File.java> <pkg.Class> class
+```
+
 ## `build-check.sh` — compile check
 
 ```bash
