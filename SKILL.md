@@ -1,22 +1,20 @@
 ---
 name: eglot-java-test
-description: Run a Java test class or method, check that a file compiles, in this project through JDTLS/Eglot (via emacsclient). Use after editing a .java file to verify it compiles, when asked to run a test or a specific test method, to check if a fix passes, to iterate on a Java test failure, or when you would otherwise have to ask the user to manually navigate to a screen and report back a locator/selector (add a page-source print to the test and run it) — as an alternative to shelling out to mvnw directly. Also governs how to read results and search code while doing so: filter script output with OUTPUT_GREP/OUTPUT_TAIL and search source with the Grep/Glob/Read/LSP tools, never Bash grep/sed/awk/find/head/tail (use the Edit tool to change code).
+description: Run a Java test class or method, check that a file compiles, in this project through JDTLS/Eglot (via emacsclient). Use after editing a .java file to verify it compiles, when asked to run a test or a specific test method, to check if a fix passes, to iterate on a Java test failure, or when you would otherwise have to ask the user to manually navigate to a screen and report back a locator/selector (add a page-source print to the test and run it) — as an alternative to shelling out to mvnw directly. Filter script output with the OUTPUT_GREP/OUTPUT_TAIL env vars instead of piping through Bash grep/sed/head/tail.
 ---
 
 # eglot-java-test
 
 > **Rules (read first):**
-> 1. **No Bash text-munging.** Never use `grep`, `find`, `sed`, `awk`, `head`
->    or `tail` in Bash — not to search source (`grep -n X $(find src -name
->    Foo.java) | head`), not to edit it (`sed -i 's/.../.../' Foo.java`), not
->    to read a range (`sed -n '47,55p'`), not on script output. Search:
->    Grep / Glob / LSP tools. Read: Read tool with offset/limit. Edit: Edit
->    tool. Script output: `OUTPUT_GREP` / `OUTPUT_TAIL` env vars on the call.
+> 1. **Trim output with `OUTPUT_GREP` / `OUTPUT_TAIL`** on the script call,
+>    not Bash `grep`/`sed`/`head`/`tail` afterwards. (General source
+>    search/read/edit guidance lives in the `emacsclient` skill of
+>    `emacs-skills`.)
 > 2. **No polling.** Scripts block until the run finishes. Never wrap them in
 >    `until grep ...; do sleep; done` on an output file.
 > 3. **Compile check = `build-check.sh`**, tests = `run-and-read.sh`.
 >
-> Details: "Trimming output" and "Searching source" below.
+> Details: "Trimming output" below.
 
 Drives the user's already-running Emacs +
 [`eglot-helpers-java`](https://github.com/koprotk/eglot-helpers-java) +
@@ -121,23 +119,6 @@ OUTPUT_GREP='BUILD SUCCESS\|BUILD FAILURE\|Tests run:\|Test result was\|PAGE_SOU
 OUTPUT_TAIL=40 \
 scripts/run-and-read.sh <project-root> <File.java> <pkg.Class> class
 ```
-
-## Searching source: use the dedicated tools, not Bash
-
-While iterating on a test or screen class, do not search, read or edit source
-with `grep`, `find`, `sed`, `head` or `tail` in Bash (e.g. `grep -n ... $(find src
--name Foo.java) | head`). Use:
-
-- **Grep / Glob tools** — text search and file lookup (`glob` limits Grep to
-  one file name, replacing the `find`; Grep's own limit replaces `head`).
-- **Read tool** — a line range of a file instead of `sed -n`.
-- **Edit tool** — changes to source instead of `sed -i` (it errors if the
-  text doesn't match, where `sed -i` fails silently).
-- **LSP tool** — symbol questions (`documentSymbol`, `workspaceSymbol`,
-  `findReferences`, `goToDefinition`) are answered by JDTLS and are more
-  accurate than text matching.
-
-These scripts are for building and running tests, not for source search.
 
 ## `build-check.sh` — compile check
 
