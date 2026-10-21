@@ -109,6 +109,21 @@ OUTPUT_TAIL=40 \
 scripts/run-and-read.sh <project-root> <File.java> <pkg.Class> class
 ```
 
+## Searching source: use the dedicated tools, not Bash
+
+While iterating on a test or screen class, do not search or read source with
+`grep`, `find`, `sed`, `head` or `tail` in Bash (e.g. `grep -n ... $(find src
+-name Foo.java) | head`). Use:
+
+- **Grep / Glob tools** — text search and file lookup (`glob` limits Grep to
+  one file name, replacing the `find`; Grep's own limit replaces `head`).
+- **Read tool** — a line range of a file instead of `sed -n`.
+- **LSP tool** — symbol questions (`documentSymbol`, `workspaceSymbol`,
+  `findReferences`, `goToDefinition`) are answered by JDTLS and are more
+  accurate than text matching.
+
+These scripts are for building and running tests, not for source search.
+
 ## `build-check.sh` — compile check
 
 ```bash
