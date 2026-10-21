@@ -78,6 +78,25 @@ interactive, in that Emacs: `C-g`, `M-x eglot-reconnect`, or
 
 ---
 
+## Trimming output (`OUTPUT_GREP` / `OUTPUT_TAIL`)
+
+Both scripts print the whole compilation/comint buffer by default. To trim it
+**inside Emacs** instead of piping through `sed`/`grep`/`tail` afterwards, set
+env vars on the call (applied to a temp copy; the real buffer is untouched):
+
+- `OUTPUT_GREP='<emacs-regexp>'` — keep only matching lines (`keep-lines`,
+  case-sensitive). Emacs regexp syntax: alternation is `\|`, not `|`.
+  Example: `OUTPUT_GREP='FAILED\|ERROR\|Tests run:'`.
+- `OUTPUT_TAIL=<n>` — keep only the last n lines (applied after
+  `OUTPUT_GREP`).
+
+```bash
+OUTPUT_GREP='FAILED\|ERROR' OUTPUT_TAIL=40 scripts/run-and-read.sh ...
+```
+
+Prefer these over shell post-processing. Start with the filtered view; fall
+back to the full buffer only if the filter hides what you need.
+
 ## `build-check.sh` — compile check
 
 ```bash

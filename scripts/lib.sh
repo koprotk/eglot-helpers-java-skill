@@ -258,3 +258,41 @@ find_or_open_buffer() {
   done
   echo "==> JDTLS attached." >&2
 }
+
+# dump_buffer BUFFER-NAME OUT-FILE
+# Writes the contents of an Emacs buffer to OUT-FILE, optionally filtered
+# inside Emacs (on a temp copy -- the real buffer is never modified):
+#   OUTPUT_GREP  Emacs regexp (note: alternation is `\|', not `|'); keep only
+#                matching lines (`keep-lines', case-sensitive)
+#   OUTPUT_TAIL  positive integer; keep only the last N lines (applied after
+#                OUTPUT_GREP)
+# Both unset/empty = full buffer. Returns non-zero on a bad OUTPUT_TAIL or if
+# Emacs stops responding.
+dump_buffer() {
+  local buf=$1 out=$2
+  local grep_re=${OUTPUT_GREP:-} tail_n=${OUTPUT_TAIL:-0}
+  case "$tail_n" in
+    ''|*[!0-9]*) echo "ERROR: OUTPUT_TAIL must be a non-negative integer, got: $tail_n" >&2; return 1 ;;
+  esac
+  local form
+  form=$(render_form '
+(let ((grep-re "@@GREP@@")
+      (tail-n @@TAIL@@)
+      (text (with-current-buffer (get-buffer "@@BUF@@")
+              (buffer-substring-no-properties (point-min) (point-max)))))
+  (with-temp-buffer
+    (insert text)
+    (unless (string-empty-p grep-re)
+      (goto-char (point-min))
+      (let ((case-fold-search nil))
+        (keep-lines grep-re)))
+    (when (> tail-n 0)
+      (goto-char (point-max))
+      (forward-line (- tail-n))
+      (delete-region (point-min) (point)))
+    (write-region (point-min) (point-max) "@@OUT@@" nil (quote silent))))
+' '@@GREP@@' "$grep_re" '@@BUF@@' "$buf" '@@OUT@@' "$out")
+  form=${form//@@TAIL@@/$tail_n}
+  eeval "$form" >/dev/null
+  [ $? -ne 124 ] || { echo "ERROR: Emacs stopped responding while reading buffer $buf." >&2; return 8; }
+}

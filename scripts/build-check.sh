@@ -135,11 +135,7 @@ fi
   rm -f "$SENTINEL_FILE"
 
   OUTPUT_FILE=$(mktemp)
-  dump_form=$(render_form '
-(with-current-buffer (get-buffer "@@BUF@@")
-  (write-region (point-min) (point-max) "@@OUT@@" nil (quote silent)))
-' '@@BUF@@' "$COMP_BUFFER" '@@OUT@@' "$OUTPUT_FILE")
-  eeval "$dump_form" >/dev/null
+  dump_buffer "$COMP_BUFFER" "$OUTPUT_FILE" || { rc=$?; rm -f "$OUTPUT_FILE"; exit "$rc"; }
 
   echo "Build status: see mvn output below for pass/fail"
   echo

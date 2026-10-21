@@ -217,15 +217,12 @@ done
 rm -f "$SENTINEL_FILE"
 
 # ---------------------------------------------------------------------------
-# Print the full buffer via a temp file — sidesteps any Lisp string-escaping
-# round-trip through emacsclient's prin1'd return value.
+# Print the buffer via a temp file (optionally filtered in Emacs by
+# OUTPUT_GREP / OUTPUT_TAIL -- see dump_buffer in lib.sh) -- sidesteps any
+# Lisp string-escaping round-trip through emacsclient's prin1'd return value.
 # ---------------------------------------------------------------------------
 OUTPUT_FILE=$(mktemp)
-dump_form=$(render_form '
-(with-current-buffer (get-buffer "@@BUF@@")
-  (write-region (point-min) (point-max) "@@OUT@@" nil (quote silent)))
-' '@@BUF@@' "$COMP_BUFFER" '@@OUT@@' "$OUTPUT_FILE")
-eeval "$dump_form" >/dev/null
+dump_buffer "$COMP_BUFFER" "$OUTPUT_FILE" || { rc=$?; rm -f "$OUTPUT_FILE"; exit "$rc"; }
 
 cat "$OUTPUT_FILE"
 rm -f "$OUTPUT_FILE"
