@@ -26,7 +26,7 @@ Two scripts, pick based on what you actually need:
 
 | Script | Use when | Cost |
 |---|---|---|
-| `scripts/build-check.sh` | You just edited a `.java` file and want to know it still compiles | Cheap — incremental compile via JDTLS's own builder (falls back to a Maven build if no Eglot server is attached) |
+| `scripts/build-check.sh` | You just edited a `.java` file and want to know it still compiles | Runs `eglot-helpers-java-mvn-build-project-skiptests` (`mvnw clean package -DskipTests -U`); no JDTLS needed |
 | `scripts/run-and-read.sh` | You need to actually exercise a test class/method | Heavier — spins up a JVM (or Maven) to run it |
 
 **Default to `build-check.sh` right after editing a file.** Only reach for
@@ -41,7 +41,7 @@ Two scripts, pick based on what you actually need:
   `mvnw` instead; tell the user emacsclient isn't reachable.
 - [`eglot-helpers-java`](https://github.com/koprotk/eglot-helpers-java) must
   be loaded in that Emacs — this skill drives its private `--run-test`
-  function and its `build-workspace` LSP call directly.
+  function and its `mvn-build-project-skiptests` command directly.
 
 Both scripts share the same buffer-discovery logic (`scripts/lib.sh`):
 look for a `.java` buffer already open under `project-root` that JDTLS
@@ -81,56 +81,23 @@ interactive, in that Emacs: `C-g`, `M-x eglot-reconnect`, or
 ## `build-check.sh` — compile check
 
 ```bash
-scripts/build-check.sh <project-root> <path/to/File.java> [full=0] [request-timeout=120] [cold-start-timeout=300] [mvn-fallback-timeout=900]
+scripts/build-check.sh <project-root> <path/to/File.java> [build-timeout=900]
 ```
 
-Calls JDTLS's `java/buildWorkspace` LSP request directly (the same one
-`M-x eglot-helpers-java-build-workspace` uses) — incremental by default,
-pass `1` as the third argument to force a full rebuild. Prints:
+Runs only `eglot-helpers-java-mvn-build-project-skiptests` (`mvnw clean
+package -DskipTests -U`) with the target file's buffer as context, waits for
+the Maven compilation buffer to finish, and prints its full output. No JDTLS
+attach, no `java/buildWorkspace`, no Flymake diagnostics — read pass/fail
+from the Maven output.
 
-```
-Build status: SUCCEEDED|FAILED|CANCELLED|WITHDRAWN
-Diagnostics for File.java:
-<Flymake diagnostics for that file, one per line, or "(no diagnostics)">
-```
+Caveat: `mvnw clean` deletes `target/classes` outside Eclipse's resource API
+and can corrupt the JDTLS workspace cache (`ObjectNotFoundException` at next
+startup) for any buffer in the same project that has a live JDTLS session.
 
-The script force-enables `flymake-mode` in the buffer if it is not already
-on — Eglot managing a buffer does not guarantee Flymake is active (depends
-on the user's config), and without it there is nothing to read diagnostics
-from. Diagnostics are scoped to the one file you passed in, since Flymake
-is buffer-local; this will not surface errors *caused* in other files by
-your edit.
-
-### Fallback to Maven when there's no active Eglot server
-
-If the target buffer has no active Eglot server at all (JDTLS never
-attached, or its connection died), the script does not just error out — it
-falls back to `eglot-helpers-java-mvn-build-project-skiptests` (`mvnw clean
-package -DskipTests -U`), the same way `run-and-read.sh` falls back to
-`mvnw -Dtest=... test` when the JDTLS test plugin isn't loaded. It prints
-`Build status: ran via mvn fallback` followed by the full Maven
-compilation-buffer output instead of the LSP status/diagnostics shape above.
-
-This is deliberately scoped to *only* that one condition — not a cold-start
-timeout (exit 3) or a wedged Emacs (exit 8). `eglot-helpers-java-mvn-build-
-project-skiptests`'s own docstring warns that `mvnw clean` deletes
-`target/classes` outside Eclipse's resource API and can corrupt the JDTLS
-workspace cache (`ObjectNotFoundException` at next startup) for any *other*
-buffer in the same project that still has a live JDTLS session. Firing it
-while JDTLS is mid-attach elsewhere is exactly that collision; "no active
-server on this buffer" is the one case where there's nothing live here to
-corrupt. (This is a different situation from an unreachable `emacsclient`,
-covered in Prerequisites above — that one still fails fast and tells you,
-since there's no Emacs-side fallback path available at all in that case.)
-
-Exit codes: `0` finished (even on `Build status: FAILED`, or after a
-successful mvn fallback run — that is real signal in the text, not a
-script failure), `1` bad args, `2` emacsclient unreachable, `3` cold-start
-timeout, `4` no compilation buffer appeared within 10s of triggering the
-mvn fallback build (only reachable via that path), `5` mvn-fallback-timeout
-exceeded, `8` Emacs stopped responding before the build request (or the
-mvn fallback) returned — see "If the Eglot connection dies or Emacs itself
-wedges" above.
+Exit codes: `0` finished (even if the Maven build failed — that is real
+signal in the text, not a script failure), `1` bad args, `2` emacsclient
+unreachable, `4` no compilation buffer appeared within 10s of triggering the
+build, `5` build-timeout exceeded, `8` Emacs stopped responding.
 
 ## `run-and-read.sh` — run a test class or method
 

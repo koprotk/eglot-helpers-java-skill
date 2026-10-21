@@ -15,7 +15,7 @@ See [`SKILL.md`](./SKILL.md) for what it does and how to install it
 ```
 SKILL.md              trigger description + usage, read by Claude Code
 scripts/lib.sh         shared emacsclient/buffer-discovery helpers
-scripts/build-check.sh cheap "does it compile" check via java/buildWorkspace
+scripts/build-check.sh "does it compile" check via eglot-helpers-java-mvn-build-project-skiptests
 scripts/run-and-read.sh run a test class/method and read the result
 ```
 
