@@ -1,9 +1,20 @@
 ---
 name: eglot-java-test
-description: Run a Java test class or method, check that a file compiles, in this project through JDTLS/Eglot (via emacsclient). Use after editing a .java file to verify it compiles, when asked to run a test or a specific test method, to check if a fix passes, to iterate on a Java test failure, or when you would otherwise have to ask the user to manually navigate to a screen and report back a locator/selector (add a page-source print to the test and run it) — as an alternative to shelling out to mvnw directly.
+description: Run a Java test class or method, check that a file compiles, in this project through JDTLS/Eglot (via emacsclient). Use after editing a .java file to verify it compiles, when asked to run a test or a specific test method, to check if a fix passes, to iterate on a Java test failure, or when you would otherwise have to ask the user to manually navigate to a screen and report back a locator/selector (add a page-source print to the test and run it) — as an alternative to shelling out to mvnw directly. Also governs how to read results and search code while doing so: filter script output with OUTPUT_GREP/OUTPUT_TAIL and search source with the Grep/Glob/Read/LSP tools, never Bash grep/sed/find/head/tail.
 ---
 
 # eglot-java-test
+
+> **Rules (read first):**
+> 1. **No Bash text-munging.** Never use `grep`, `find`, `sed`, `head` or
+>    `tail` in Bash — not on source (`grep -n X $(find src -name Foo.java) |
+>    head`), not on script output. Source: Grep / Glob / Read / LSP tools.
+>    Script output: `OUTPUT_GREP` / `OUTPUT_TAIL` env vars on the call.
+> 2. **No polling.** Scripts block until the run finishes. Never wrap them in
+>    `until grep ...; do sleep; done` on an output file.
+> 3. **Compile check = `build-check.sh`**, tests = `run-and-read.sh`.
+>
+> Details: "Trimming output" and "Searching source" below.
 
 Drives the user's already-running Emacs +
 [`eglot-helpers-java`](https://github.com/koprotk/eglot-helpers-java) +
