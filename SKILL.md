@@ -1,6 +1,6 @@
 ---
 name: eglot-java-test
-description: Run a Java test class or method, check that a file compiles, in this project through JDTLS/Eglot (via emacsclient). Use after editing a .java file to verify it compiles, when asked to run a test or a specific test method, to check if a fix passes, to iterate on a Java test failure, or when you would otherwise have to ask the user to manually navigate to a screen and report back a locator/selector (add a page-source print to the test and run it) — as an alternative to shelling out to mvnw directly. Filter script output with the OUTPUT_GREP/OUTPUT_TAIL env vars instead of piping through Bash grep/sed/head/tail.
+description: Run a Java test class or method, check that a file compiles, in this project through JDTLS/Eglot (via emacsclient). Use after editing a .java file to verify it compiles, when asked to run a test or a specific test method, to check if a fix passes, to iterate on a Java test failure, or when you would otherwise have to ask the user to manually navigate to a screen and report back a locator/selector (add a page-source print to the test and run it) — as an alternative to shelling out to mvnw directly. Filter script output with the OUTPUT_GREP/OUTPUT_TAIL env vars instead of piping through Bash grep/sed/head/tail. Never add, remove or sort Java import lines by hand: write bare class names and run scripts/organize-imports.sh so JDTLS manages imports.
 ---
 
 # eglot-java-test
@@ -12,9 +12,12 @@ description: Run a Java test class or method, check that a file compiles, in thi
 >    `emacs-skills`.)
 > 2. **No polling.** Scripts block until the run finishes. Never wrap them in
 >    `until grep ...; do sleep; done` on an output file.
-> 3. **Compile check = `build-check.sh`**, tests = `run-and-read.sh`.
+> 3. **Never hand-edit imports.** Don't add, remove or reorder `import`
+>    lines yourself — write bare class names in the code, then run
+>    `organize-imports.sh` once and let JDTLS add/remove/sort them.
+> 4. **Compile check = `build-check.sh`**, tests = `run-and-read.sh`.
 >
-> Details: "Trimming output" below.
+> Details: "Trimming output" and "`organize-imports.sh`" below.
 
 Drives the user's already-running Emacs +
 [`eglot-helpers-java`](https://github.com/koprotk/eglot-helpers-java) +
@@ -33,12 +36,17 @@ This repo IS the skill directory. Either:
 Script paths below are relative to wherever this `SKILL.md` ends up living
 — resolve them against that directory, not the consuming project's root.
 
-Two scripts, pick based on what you actually need:
+Three scripts, pick based on what you actually need:
 
 | Script | Use when | Cost |
 |---|---|---|
+| `scripts/organize-imports.sh` | You added/removed a class usage and imports need to match | Cheap — one JDTLS `source.organizeImports` code action; saves the file |
 | `scripts/build-check.sh` | You just edited a `.java` file and want to know it still compiles | Runs `eglot-helpers-java-mvn-build-project-skiptests` (`mvnw clean package -DskipTests -U`); no JDTLS needed |
 | `scripts/run-and-read.sh` | You need to actually exercise a test class/method | Heavier — spins up a JVM (or Maven) to run it |
+
+**Edit code → `organize-imports.sh` → `build-check.sh`.** Run
+`organize-imports.sh` after edits that add or drop class references, before
+`build-check.sh`.
 
 **Default to `build-check.sh` right after editing a file.** Only reach for
 `run-and-read.sh` when you specifically need test *behavior*, not just
@@ -119,6 +127,45 @@ OUTPUT_GREP='BUILD SUCCESS\|BUILD FAILURE\|Tests run:\|Test result was\|PAGE_SOU
 OUTPUT_TAIL=40 \
 scripts/run-and-read.sh <project-root> <File.java> <pkg.Class> class
 ```
+
+## `organize-imports.sh` — let JDTLS manage imports
+
+```bash
+scripts/organize-imports.sh <project-root> <path/to/File.java> [cold-start-timeout=300]
+```
+
+Runs Eglot's `eglot-code-action-organize-imports` (JDTLS's
+`source.organizeImports` action) on the file: removes unused imports, adds
+missing ones, sorts them per the project's import order, and saves the file.
+Prints `Imports: CHANGED|UNCHANGED` and the resulting `import` block.
+
+**Workflow instead of editing imports yourself:**
+1. Write the code using bare class names (`List`, `WebElement`, ...). Do not
+   hand-write the matching `import` lines, and do not delete or reorder
+   existing ones when you remove usages.
+2. Run `organize-imports.sh` once.
+3. Run `build-check.sh`. If it reports a "cannot be resolved" error for a
+   name that was **ambiguous** (same simple name in several packages, e.g.
+   `List`), add just that one import by hand — JDTLS cannot pick between
+   candidates without asking.
+
+**Import order and grouping come from the user's Emacs config, not this
+skill.** JDTLS sorts using `java.completion.importOrder` (and the formatter's
+`blank_lines_between_import_groups`). A project's order must be set as a
+*dir-local* `eglot-workspace-configuration` (e.g. via
+`dir-locals-set-class-variables` in `config.el`): Eglot answers JDTLS's
+`workspace/configuration` requests from a temporary buffer that sees only the
+global value and dir-locals, so a `setq-local` in a mode hook never reaches
+JDTLS. If the script rewrites imports into an unexpected order or adds blank
+lines between groups, that config is the place to look — don't reorder by hand.
+
+If the file's Emacs buffer has unsaved edits the script refuses to touch it
+(exit 6) rather than overwrite them. Edits made on disk (e.g. via the Edit
+tool) are picked up by reverting the buffer first.
+
+Exit codes: `0` finished, `1` bad args, `2` emacsclient unreachable, `3`
+cold-start timeout, `6` buffer has unsaved edits, `7` buffer not managed by
+Eglot or the code action failed, `8` Emacs stopped responding.
 
 ## `build-check.sh` — compile check
 

@@ -15,6 +15,7 @@ See [`SKILL.md`](./SKILL.md) for what it does and how to install it
 ```
 SKILL.md              trigger description + usage, read by Claude Code
 scripts/lib.sh         shared emacsclient/buffer-discovery helpers
+scripts/organize-imports.sh let JDTLS add/remove/sort a file's imports
 scripts/build-check.sh "does it compile" check via eglot-helpers-java-mvn-build-project-skiptests
 scripts/run-and-read.sh run a test class/method and read the result
 ```
