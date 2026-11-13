@@ -1,19 +1,19 @@
 # eglot-helpers-java-skill
 
-A Claude Code skill that drives
+An agent skill for Claude Code and GitHub Copilot CLI that drives
 [`eglot-helpers-java`](https://github.com/koprotk/eglot-helpers-java) via
 `emacsclient` — lets an agent check that a Java file still compiles, or run
 a test class/method, through the user's already-running Emacs + Eglot +
 JDTLS instead of cold-starting Maven from the shell.
 
-See [`SKILL.md`](./SKILL.md) for what it does and how to install it
-(personal `~/.claude/skills/eglot-java-test/` or project-scoped
-`.claude/skills/eglot-java-test/`).
+See [`SKILL.md`](./SKILL.md) for usage and installation. The same skill
+directory works with both agents; install it in the appropriate skills
+location for your setup.
 
 ## Layout
 
 ```
-SKILL.md              trigger description + usage, read by Claude Code
+SKILL.md              trigger description + usage, read by both agents
 scripts/lib.sh         shared emacsclient/buffer-discovery helpers
 scripts/organize-imports.sh let JDTLS add/remove/sort a file's imports
 scripts/build-check.sh "does it compile" check via eglot-helpers-java-mvn-build-project-skiptests

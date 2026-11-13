@@ -24,17 +24,25 @@ Drives the user's already-running Emacs +
 JDTLS via `emacsclient`, instead of cold-starting Maven from the shell.
 Faster, and gives the same signal the user sees interactively.
 
-## Installing
+## Installing for Claude Code or GitHub Copilot CLI
 
-This repo IS the skill directory. Either:
+This repo is the skill directory. Keep `SKILL.md` and `scripts/` together
+when installing; script paths below are relative to this directory, not the
+consuming project's root.
 
-- **Personal** (works across every project): symlink or clone it to
+- **Claude Code, personal:** symlink or clone it to
   `~/.claude/skills/eglot-java-test/`.
-- **Project-scoped** (ships with one repo): copy or symlink it to
-  `<project>/.claude/skills/eglot-java-test/`.
+- **Copilot CLI, personal:** symlink or clone it to
+  `~/.copilot/skills/eglot-java-test/`.
+- **Project-scoped:** place or symlink the skill directory at
+  `<project>/.claude/skills/eglot-java-test/` for Claude Code, or
+  `<project>/.github/skills/eglot-java-test/` for Copilot CLI. Copilot CLI
+  also discovers skills in `.claude/skills`, so that location can be shared
+  when both agents use the same project.
 
-Script paths below are relative to wherever this `SKILL.md` ends up living
-— resolve them against that directory, not the consuming project's root.
+If Copilot CLI is already running after installation, run `/skills reload`;
+use `/skills info eglot-java-test` to confirm discovery. Invoke it explicitly
+with `/eglot-java-test`, or let Copilot select it from the task.
 
 Three scripts, pick based on what you actually need:
 
