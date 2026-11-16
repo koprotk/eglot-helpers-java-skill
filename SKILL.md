@@ -127,14 +127,21 @@ back to the full buffer only if the filter hides what you need.
 **Do not poll the script's output file.** The scripts already block until the
 Maven/comint run finishes and print only afterwards, so a wrapper like
 `until grep -q "Comint finished" out; do sleep 5; done; grep ... out | tail`
-is redundant. Run the script once (in the foreground, or in the background
-and wait for its completion notification), with the filter on the call:
+is redundant. Run the script once, with the filter on the call:
 
 ```bash
 OUTPUT_GREP='BUILD SUCCESS\|BUILD FAILURE\|Tests run:\|Test result was\|PAGE_SOURCE_START' \
 OUTPUT_TAIL=40 \
 scripts/run-and-read.sh <project-root> <File.java> <pkg.Class> class
 ```
+
+**Run the scripts in the foreground; don't use `run_in_background`.** The
+output is already the Emacs comint/compilation buffer, printed straight into
+the Bash result. Backgrounding only adds a pointless
+`/tmp/claude-*/tasks/<id>.output` file that you then have to `Read`. To look
+at a run in progress (or re-read the buffer without re-running), query Emacs
+directly instead of an output file, e.g.
+`emacsclient --eval '(with-current-buffer "<buffer-name>" (buffer-substring-no-properties (point-min) (point-max)))'`.
 
 ## `organize-imports.sh` — let JDTLS manage imports
 
