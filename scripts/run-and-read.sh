@@ -114,29 +114,10 @@ eeval "$run_form" >/dev/null
 # Discover the compilation buffer `compile' just created for this project.
 # ---------------------------------------------------------------------------
 echo "==> locating the compilation buffer..." >&2
-find_comp_form=$(render_form '
-(progn
-  (require (quote cl-lib))
-  (let ((root (file-name-as-directory (expand-file-name "@@ROOT@@"))))
-    (or (cl-loop for b in (buffer-list)
-                 when (and (buffer-live-p b)
-                           (with-current-buffer b
-                             ;; compile with COMINT=t (what --run-test uses)
-                             ;; produces a comint-mode buffer with
-                             ;; compilation-shell-minor-mode layered on top,
-                             ;; not a compilation-mode major mode -- check both.
-                             (and (or (derived-mode-p (quote compilation-mode))
-                                      (bound-and-true-p compilation-shell-minor-mode))
-                                  default-directory
-                                  (string-prefix-p root (expand-file-name default-directory)))))
-                 return (buffer-name b))
-        "")))
-' '@@ROOT@@' "$PROJECT_ROOT")
-
 elapsed=0
 COMP_BUFFER=""
 while [ "$elapsed" -lt 10 ]; do
-  COMP_BUFFER=$(unquote "$(eeval "$find_comp_form")")
+  COMP_BUFFER=$(find_comp_buffer "$PROJECT_ROOT")
   [ -n "$COMP_BUFFER" ] && break
   sleep 1
   elapsed=$((elapsed + 1))
@@ -226,3 +207,4 @@ dump_buffer "$COMP_BUFFER" "$OUTPUT_FILE" || { rc=$?; rm -f "$OUTPUT_FILE"; exit
 
 cat "$OUTPUT_FILE"
 rm -f "$OUTPUT_FILE"
+echo "==> full run output stays in Emacs buffer $COMP_BUFFER. Need other lines? Re-read it with read-buffer.sh (new OUTPUT_GREP/OUTPUT_TAIL) -- do NOT re-run the test." >&2

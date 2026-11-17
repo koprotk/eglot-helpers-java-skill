@@ -12,10 +12,14 @@ description: Run a Java test class or method, check that a file compiles, in thi
 >    `emacs-skills`.)
 > 2. **No polling.** Scripts block until the run finishes. Never wrap them in
 >    `until grep ...; do sleep; done` on an output file.
-> 3. **Never hand-edit imports.** Don't add, remove or reorder `import`
+> 3. **Truncated output? Re-read the buffer, never re-run.** The full
+>    run output stays in the Emacs comint buffer. Get other lines with
+>    `scripts/read-buffer.sh <project-root>` + new `OUTPUT_GREP`/`OUTPUT_TAIL`.
+>    A second test run just to see more output is wasted minutes.
+> 4. **Never hand-edit imports.** Don't add, remove or reorder `import`
 >    lines yourself — write bare class names in the code, then run
 >    `organize-imports.sh` once and let JDTLS add/remove/sort them.
-> 4. **Compile check = `build-check.sh`**, tests = `run-and-read.sh`.
+> 5. **Compile check = `build-check.sh`**, tests = `run-and-read.sh`.
 >
 > Details: "Trimming output" and "`organize-imports.sh`" below.
 
@@ -44,12 +48,13 @@ If Copilot CLI is already running after installation, run `/skills reload`;
 use `/skills info eglot-java-test` to confirm discovery. Invoke it explicitly
 with `/eglot-java-test`, or let Copilot select it from the task.
 
-Three scripts, pick based on what you actually need:
+Four scripts, pick based on what you actually need:
 
 | Script | Use when | Cost |
 |---|---|---|
 | `scripts/organize-imports.sh` | You added/removed a class usage and imports need to match | Cheap — one JDTLS `source.organizeImports` code action; saves the file |
 | `scripts/build-check.sh` | You just edited a `.java` file and want to know it still compiles | Runs `eglot-helpers-java-mvn-build-project-skiptests` (`mvnw clean package -DskipTests -U`); no JDTLS needed |
+| `scripts/read-buffer.sh` | Output of a run you already did was truncated/filtered too hard and you need other lines | Free — reads the existing Emacs buffer, runs nothing |
 | `scripts/run-and-read.sh` | You need to actually exercise a test class/method | Heavier — spins up a JVM (or Maven) to run it |
 
 **Edit code → `organize-imports.sh` → `build-check.sh`.** Run
@@ -142,6 +147,24 @@ the Bash result. Backgrounding only adds a pointless
 at a run in progress (or re-read the buffer without re-running), query Emacs
 directly instead of an output file, e.g.
 `emacsclient --eval '(with-current-buffer "<buffer-name>" (buffer-substring-no-properties (point-min) (point-max)))'`.
+
+## `read-buffer.sh` — re-read a finished run, never re-run
+
+```bash
+OUTPUT_GREP='<regexp>' OUTPUT_TAIL=<n> scripts/read-buffer.sh <project-root> [buffer-name]
+```
+
+`run-and-read.sh` and `build-check.sh` print the buffer name on stderr
+(`==> compilation buffer: ...`). If the filtered output you got doesn't show
+the failure cause (e.g. `OUTPUT_TAIL=30` only caught Maven's footer), call
+`read-buffer.sh` with a different filter — e.g.
+`OUTPUT_GREP='ERROR\|WARN\|Exception\|Locator\|Error Message\|Tests run:'`
+or a larger `OUTPUT_TAIL`. Never launch the test again just to see more
+output. Omit `buffer-name` to use the project's compilation buffer.
+
+**Pick a generous first filter** so a re-read is rarely needed: include
+`Exception\|Error Message\|Locator\|Tests run:\|FAILURE` alongside
+`OUTPUT_TAIL`, not a bare tail of ~30 lines.
 
 ## `organize-imports.sh` — let JDTLS manage imports
 

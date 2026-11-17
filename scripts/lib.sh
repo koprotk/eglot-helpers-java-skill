@@ -296,3 +296,28 @@ dump_buffer() {
   eeval "$form" >/dev/null
   [ $? -ne 124 ] || { echo "ERROR: Emacs stopped responding while reading buffer $buf." >&2; return 8; }
 }
+
+# find_comp_buffer PROJECT_ROOT -> prints the name of a comint/compilation
+# buffer whose default-directory is under PROJECT_ROOT ("" if none).
+find_comp_buffer() {
+  local form
+  form=$(render_form '
+(progn
+  (require (quote cl-lib))
+  (let ((root (file-name-as-directory (expand-file-name "@@ROOT@@"))))
+    (or (cl-loop for b in (buffer-list)
+                 when (and (buffer-live-p b)
+                           (with-current-buffer b
+                             ;; compile with COMINT=t (what --run-test uses)
+                             ;; produces a comint-mode buffer with
+                             ;; compilation-shell-minor-mode layered on top,
+                             ;; not a compilation-mode major mode -- check both.
+                             (and (or (derived-mode-p (quote compilation-mode))
+                                      (bound-and-true-p compilation-shell-minor-mode))
+                                  default-directory
+                                  (string-prefix-p root (expand-file-name default-directory)))))
+                 return (buffer-name b))
+        "")))
+' '@@ROOT@@' "$1")
+  unquote "$(eeval "$form")"
+}
